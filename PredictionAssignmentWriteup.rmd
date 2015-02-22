@@ -1,0 +1,187 @@
+Prediction of Weight Lifting Style Write Up
+========================================================
+
+## Introduction
+
+With the availability of low cost accelerometers, there are many opportunities to measure human activities.In this paper we examine whether we can determine the weight lifting form using the accelerometer data collected.
+
+
+## Data preparation
+
+Load both datasets.
+
+```{r}
+download.file('https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv', 'training.csv') #, method='curl')
+download.file('https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv', 'testing.csv') #, method='curl')
+raw_testing <- read.csv('testing.csv')
+data <- read.csv('training.csv')
+```
+
+This analysis allows us to note two main points :
+ 1 - Some numeric data have been imported as factor because of the presence of some characters ("#DIV/0!")
+ 2 - Some columns have a really low completion rate (a lot of missing data)
+ 
+To manage the first issue we need to reimport data ignoring "#DIV/0!" values :
+
+```{r}
+raw_testing <- read.csv('testing.csv', na.strings=c("#DIV/0!"))
+data <- read.csv('training.csv', na.strings=c("#DIV/0!") )
+```
+
+Partition training data provided into two sets. One for training and one for cross validation.
+
+```{r}
+library(caret)
+```
+
+And force the cast to numeric values for the specified columns (i.e.: 8 to end):
+```{r}
+cTest <- raw_testing
+for(i in c(8:ncol(cTest)-1)) {cTest[,i] = as.numeric(as.character(cTest[,i]))}
+cData <- data
+for(i in c(8:ncol(cData)-1)) {cData[,i] = as.numeric(as.character(cData[,i]))}
+```
+
+To manage the second issue we will select as feature only the column with a 100% completion rate ( as seen in analysis phase, the completion rate in this dataset is very binary) We will also filter some features which seem to be useless like "X"", timestamps, "new_window" and "num_window". We filter also user_name because we don't want learn from this feature (name cannot be a good feature in our case and we don't want to limit the classifier to the name existing in our training dataset)
+```{r}
+featuresnames <- colnames(cData[colSums(is.na(cData)) == 0])[-(1:7)]
+features <- cData[featuresnames]
+```
+
+```{r}
+submit_Testing <- cTest[featuresnames[1:52]]
+set.seed(5188)
+xdata <- createDataPartition(y=features$classe, p=3/4, list=FALSE )
+training <- features[xdata,]
+testing <- features[-xdata,]
+```
+
+## Model
+
+We can build a random forest model using the numerical variables provided. As we will see later this provides good enough accuracy to predict the twenty test cases. Using [caret][caret], we can obtain the optimal mtry parameter of 32. This is a computationally expensive process, so only the optimized parameter is shown below.
+
+
+```{r}
+library(randomForest)
+```
+
+```
+## randomForest 4.6-10
+## Type rfNews() to see new features/changes/bug fixes.
+```
+
+```{r}
+rf_model <- randomForest(classe ~ ., ptraining, ntree = 500, mtry = 32)
+```
+
+
+## Cross Validation
+
+We are able to measure the accuracy using our training set and our cross validation set. With the training set we can detect if our model has bias due to ridgity of our mode. With the cross validation set, we are able to determine if we have variance due to overfitting.
+
+### In-sample accuracy
+
+```{r}
+training_pred <- predict(rf_model, training) 
+print(confusionMatrix(training_pred, training$classe))
+```
+
+```
+##Confusion Matrix and Statistics
+##
+##          Reference
+##Prediction    A    B    C    D    E
+##         A 4185    0    0    0    0
+##         B    0 2848    0    0    0
+##         C    0    0 2567    0    0
+##         D    0    0    0 2412    0
+##         E    0    0    0    0 2706
+##
+##Overall Statistics
+##                                     
+##               Accuracy : 1          
+##                 95% CI : (0.9997, 1)
+##    No Information Rate : 0.2843     
+##    P-Value [Acc > NIR] : < 2.2e-16  
+##                                     
+##                  Kappa : 1          
+## Mcnemar's Test P-Value : NA         
+##
+##Statistics by Class:
+##
+##                     Class: A Class: B Class: C Class: D Class: E
+##Sensitivity            1.0000   1.0000   1.0000   1.0000   1.0000
+##Specificity            1.0000   1.0000   1.0000   1.0000   1.0000
+##Pos Pred Value         1.0000   1.0000   1.0000   1.0000   1.0000
+##Neg Pred Value         1.0000   1.0000   1.0000   1.0000   1.0000
+##Prevalence             0.2843   0.1935   0.1744   0.1639   0.1839
+##Detection Rate         0.2843   0.1935   0.1744   0.1639   0.1839
+##Detection Prevalence   0.2843   0.1935   0.1744   0.1639   0.1839
+##Balanced Accuracy      1.0000   1.0000   1.0000   1.0000   1.0000
+```
+
+The in sample accuracy is 100% which indicates, the model does not suffer from bias.
+
+### Out-of-sample accuracy
+
+```{r}
+testing_pred <- predict(rf_model, testing) 
+print(confusionMatrix(testing_pred, testing$classe))
+```
+
+Confusion Matrix: 
+
+```
+##Confusion Matrix and Statistics
+##
+##          Reference
+##Prediction    A    B    C    D    E
+##         A 1393   10    0    0    0
+##         B    1  938    3    0    0
+##         C    0    1  844   10    3
+##         D    0    0    8  793    0
+##         E    1    0    0    1  898
+##
+##Overall Statistics
+##                                          
+##               Accuracy : 0.9923          
+##                 95% CI : (0.9894, 0.9945)
+##    No Information Rate : 0.2845          
+##    P-Value [Acc > NIR] : < 2.2e-16       
+##                                         
+##                  Kappa : 0.9902          
+## Mcnemar's Test P-Value : NA              
+##
+##Statistics by Class:
+##
+##                     Class: A Class: B Class: C Class: D Class: E
+##Sensitivity            0.9986   0.9884   0.9871   0.9863   0.9967
+##Specificity            0.9972   0.9990   0.9965   0.9980   0.9995
+##Pos Pred Value         0.9929   0.9958   0.9837   0.9900   0.9978
+##Neg Pred Value         0.9994   0.9972   0.9973   0.9973   0.9993
+##Prevalence             0.2845   0.1935   0.1743   0.1639   0.1837
+##Detection Rate         0.2841   0.1913   0.1721   0.1617   0.1831
+##Detection Prevalence   0.2861   0.1921   0.1750   0.1633   0.1835
+##Balanced Accuracy      0.9979   0.9937   0.9918   0.9922   0.9981
+```
+
+
+The cross validation accuracy is greater than 99%, which should be sufficient for predicting the twenty test observations. Based on the lower bound of the confidence interval we would expect to achieve a 98.94% classification accuracy on new data provided. 
+
+One caveat exists that the new data must be collected and preprocessed in a manner consistent with the training data.
+
+## Test Set Prediction Results
+
+Applying this model to the test data provided yields 100% classification accuracy on the twenty test observations.
+
+```{r}
+answers <- predict(rf_model, submit_Testing) 
+```
+
+```
+##  1  2  3  4  5  6  7  8  9 10 11 12 13 14 15 16 17 18 19 20 
+##  B  A  B  A  A  E  D  B  A  A  B  C  B  A  E  E  A  B  B  B 
+## Levels: A B C D E
+
+## Conclusion
+We are able to provide very good prediction of weight lifting style as measured with accelerometers.
